@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"time"
@@ -66,6 +67,26 @@ func (c *Client) RunCommand(cmd string) (string, error) {
 		return string(out), fmt.Errorf("running command: %w", err)
 	}
 	return string(out), nil
+}
+
+// RunCommandSeparate executes a shell command on the remote host and returns
+// stdout and stderr as separate strings.
+func (c *Client) RunCommandSeparate(cmd string) (stdout, stderr string, err error) {
+	session, err := c.conn.NewSession()
+	if err != nil {
+		return "", "", fmt.Errorf("creating session: %w", err)
+	}
+	defer session.Close()
+
+	var outBuf, errBuf bytes.Buffer
+	session.Stdout = &outBuf
+	session.Stderr = &errBuf
+
+	runErr := session.Run(cmd)
+	if runErr != nil {
+		return outBuf.String(), errBuf.String(), fmt.Errorf("running command: %w", runErr)
+	}
+	return outBuf.String(), errBuf.String(), nil
 }
 
 // Close closes the underlying SSH connection.
