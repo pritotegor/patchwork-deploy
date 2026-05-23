@@ -17,4 +17,11 @@
 //  1. Load and sort all *.sh files from cfg.PatchDir.
 //  2. For each host in cfg.Hosts, open an SSH connection.
 //  3. Apply each patch script in order, stopping on the first non-zero exit.
+//
+// Error handling:
+//
+// If a patch script exits with a non-zero status on any host, Run returns a
+// [PatchError] that captures the host address, the patch filename, and the
+// remote exit code, allowing callers to distinguish patch failures from
+// connectivity or configuration errors.
 package runner
