@@ -61,3 +61,23 @@ func TestLoadPatches_InvalidDirectory(t *testing.T) {
 		t.Fatal("expected error for nonexistent directory, got nil")
 	}
 }
+
+func TestLoadPatches_ContentMatchesFile(t *testing.T) {
+	dir := t.TempDir()
+
+	expectedContent := "#!/bin/sh\necho hello world"
+	if err := os.WriteFile(filepath.Join(dir, "001_hello.sh"), []byte(expectedContent), 0644); err != nil {
+		t.Fatalf("writing temp file: %v", err)
+	}
+
+	patches, err := patch.LoadPatches(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(patches) != 1 {
+		t.Fatalf("expected 1 patch, got %d", len(patches))
+	}
+	if patches[0].Content != expectedContent {
+		t.Errorf("expected content %q, got %q", expectedContent, patches[0].Content)
+	}
+}
