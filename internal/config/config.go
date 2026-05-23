@@ -69,3 +69,13 @@ func (h *Host) DefaultPort() int {
 	}
 	return h.Port
 }
+
+// HostByName returns the first host with the given name, or an error if not found.
+func (c *Config) HostByName(name string) (*Host, error) {
+	for i := range c.Hosts {
+		if c.Hosts[i].Name == name {
+			return &c.Hosts[i], nil
+		}
+	}
+	return nil, fmt.Errorf("host %q not found in config", name)
+}
