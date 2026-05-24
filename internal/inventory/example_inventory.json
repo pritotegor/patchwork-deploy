@@ -1,0 +1,25 @@
+{
+  "hosts": [
+    {
+      "name":    "web-01",
+      "address": "10.0.0.1",
+      "user":    "deploy",
+      "port":    22,
+      "tags":    ["web", "prod"]
+    },
+    {
+      "name":    "web-02",
+      "address": "10.0.0.2",
+      "user":    "deploy",
+      "port":    22,
+      "tags":    ["web", "prod"]
+    },
+    {
+      "name":    "db-01",
+      "address": "10.0.1.1",
+      "user":    "deploy",
+      "port":    2222,
+      "tags":    ["db", "prod"]
+    }
+  ]
+}
