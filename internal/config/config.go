@@ -1,3 +1,4 @@
+// Package config loads and validates the patchwork-deploy configuration file.
 package config
 
 import (
@@ -6,76 +7,54 @@ import (
 	"os"
 )
 
-// Host represents a remote host configuration.
-type Host struct {
-	Name    string `json:"name"`
-	Address string `json:"address"`
-	User    string `json:"user"`
-	KeyFile string `json:"key_file"`
-	Port    int    `json:"port"`
-}
-
 // Config holds the full deployment configuration.
 type Config struct {
-	PatchDir string `json:"patch_dir"`
-	Hosts    []Host `json:"hosts"`
+	Hosts       []string `json:"hosts"`
+	PatchDir    string   `json:"patch_dir"`
+	User        string   `json:"user"`
+	KeyFile     string   `json:"key_file"`
+	AuditLog    string   `json:"audit_log,omitempty"`
+	HooksBefore []string `json:"hooks_before,omitempty"`
+	HooksAfter  []string `json:"hooks_after,omitempty"`
+	DryRun      bool     `json:"dry_run,omitempty"`
+	MaxParallel int      `json:"max_parallel,omitempty"`
 }
 
-// Load reads and parses a JSON config file from the given path.
+// Load reads and validates a Config from the JSON file at path.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading config file: %w", err)
+		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
 
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing config file: %w", err)
+		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 
-	if err := cfg.validate(); err != nil {
-		return nil, fmt.Errorf("invalid config: %w", err)
+	if err := validate(&cfg); err != nil {
+		return nil, err
 	}
 
+	applyDefaults(&cfg)
 	return &cfg, nil
 }
 
-// validate checks required fields in the config.
-func (c *Config) validate() error {
-	if c.PatchDir == "" {
-		return fmt.Errorf("patch_dir must not be empty")
+func validate(cfg *Config) error {
+	if cfg.PatchDir == "" {
+		return fmt.Errorf("config: missing required field: patch_dir")
 	}
-	if len(c.Hosts) == 0 {
-		return fmt.Errorf("at least one host must be defined")
+	if cfg.User == "" {
+		return fmt.Errorf("config: missing required field: user")
 	}
-	for i, h := range c.Hosts {
-		if h.Name == "" {
-			return fmt.Errorf("host[%d]: name must not be empty", i)
-		}
-		if h.Address == "" {
-			return fmt.Errorf("host[%d]: address must not be empty", i)
-		}
-		if h.User == "" {
-			return fmt.Errorf("host[%d]: user must not be empty", i)
-		}
+	if cfg.KeyFile == "" {
+		return fmt.Errorf("config: missing required field: key_file")
 	}
 	return nil
 }
 
-// DefaultPort returns the port for a host, defaulting to 22.
-func (h *Host) DefaultPort() int {
-	if h.Port == 0 {
-		return 22
+func applyDefaults(cfg *Config) {
+	if cfg.MaxParallel < 1 {
+		cfg.MaxParallel = 1
 	}
-	return h.Port
-}
-
-// HostByName returns the first host with the given name, or an error if not found.
-func (c *Config) HostByName(name string) (*Host, error) {
-	for i := range c.Hosts {
-		if c.Hosts[i].Name == name {
-			return &c.Hosts[i], nil
-		}
-	}
-	return nil, fmt.Errorf("host %q not found in config", name)
 }

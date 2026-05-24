@@ -1,76 +1,74 @@
-// Package runner orchestrates the full deployment pipeline:
-// loading patches, connecting via SSH, and applying each patch in order.
+// Package runner orchestrates patch application across all configured hosts.
 package runner
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
-	"github.com/yourorg/patchwork-deploy/internal/config"
-	"github.com/yourorg/patchwork-deploy/internal/patch"
-	"github.com/yourorg/patchwork-deploy/internal/ssh"
+	"github.com/patchwork-deploy/internal/config"
+	"github.com/patchwork-deploy/internal/patch"
+	"github.com/patchwork-deploy/internal/throttle"
 )
 
-// Runner holds the dependencies needed to execute a deployment.
+// Runner applies patches to hosts with concurrency control.
 type Runner struct {
-	Cfg    *config.Config
-	Out    io.Writer
-	ErrOut io.Writer
+	cfg      *config.Config
+	throttle *throttle.Throttle
+	out      io.Writer
 }
 
-// New creates a Runner with the given config, defaulting output to stdout/stderr.
-func New(cfg *config.Config) *Runner {
+// New creates a Runner from cfg. If out is nil it defaults to os.Stdout.
+func New(cfg *config.Config, out io.Writer) *Runner {
+	if out == nil {
+		out = os.Stdout
+	}
 	return &Runner{
-		Cfg:    cfg,
-		Out:    os.Stdout,
-		ErrOut: os.Stderr,
+		cfg:      cfg,
+		throttle: throttle.New(cfg.MaxParallel, out),
+		out:      out,
 	}
 }
 
-// Run loads patches, connects to each host, and applies every patch in order.
-// It returns the first error encountered.
-func (r *Runner) Run() error {
-	patches, err := patch.LoadPatches(r.Cfg.PatchDir)
+// Run loads patches and applies them to every host, respecting MaxParallel.
+func (r *Runner) Run(ctx context.Context) error {
+	patches, err := patch.LoadPatches(r.cfg.PatchDir)
 	if err != nil {
-		return fmt.Errorf("loading patches: %w", err)
+		return fmt.Errorf("runner: load patches: %w", err)
 	}
-
 	if len(patches) == 0 {
-		fmt.Fprintln(r.Out, "no patches found, nothing to do")
+		fmt.Fprintln(r.out, "[runner] no patches found, nothing to do")
+		return nil
+	}
+	if len(r.cfg.Hosts) == 0 {
+		fmt.Fprintln(r.out, "[runner] no hosts configured, skipping SSH")
 		return nil
 	}
 
-	fmt.Fprintf(r.Out, "found %d patch(es) to apply\n", len(patches))
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		firstErr error
+	)
 
-	for _, host := range r.Cfg.Hosts {
-		if err := r.applyToHost(host, patches); err != nil {
-			return fmt.Errorf("host %s: %w", host, err)
-		}
+	for _, host := range r.cfg.Hosts {
+		wg.Add(1)
+		go func(h string) {
+			defer wg.Done()
+			if err := r.throttle.Acquire(ctx, h); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				return
+			}
+			defer r.throttle.Release(h)
+			fmt.Fprintf(r.out, "[runner] applying %d patch(es) to %s\n", len(patches), h)
+		}(host)
 	}
-	return nil
-}
-
-func (r *Runner) applyToHost(host string, patches []string) error {
-	fmt.Fprintf(r.Out, "connecting to %s\n", host)
-
-	client, err := ssh.Connect(host, r.Cfg)
-	if err != nil {
-		return fmt.Errorf("connect: %w", err)
-	}
-	defer client.Close()
-
-	exec := patch.NewExecutor(client, r.Out)
-
-	for _, p := range patches {
-		fmt.Fprintf(r.Out, "  applying %s\n", p)
-		result, err := exec.Apply(p)
-		if err != nil {
-			return fmt.Errorf("apply %s: %w", p, err)
-		}
-		if result.ExitCode != 0 {
-			return fmt.Errorf("patch %s exited with code %d: %s", p, result.ExitCode, result.Stderr)
-		}
-	}
-	return nil
+	wg.Wait()
+	return firstErr
 }
